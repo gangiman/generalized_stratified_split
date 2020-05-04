@@ -1,51 +1,57 @@
 #!/usr/bin/env python
 # coding: utf-8
-from typing import Optional
+from typing import Optional, Tuple, Dict, Callable, List
 from tqdm import trange
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
 import torch
+from operator import itemgetter
 from torch.utils.data import Dataset
 
 
-class MockSegmentationDataset(Dataset):
-    def __init__(self, n_samples=100, n_classes=20,
-                 class_distribution='exp', sample_shape=(100,)):
-        self.n_samples = n_samples
-        self.n_classes = n_classes
-        self.class_distribution = class_distribution
-        self.sample_shape = sample_shape
-        if class_distribution == 'exp':
-            p = np.exp(-np.arange(self.n_classes))
-            p /= p.sum()
+class OnlyLabelsDataset(Dataset):
+    def __init__(self, dataset):
+        sample = dataset[0]
+        self.dataset = dataset
+        self.label_fn = self._calc_label_fn(sample)
+
+    @staticmethod
+    def _calc_label_fn(sample: Optional[Tuple, Dict, torch.Tensor, np.ndarray]) -> Callable:
+        if isinstance(sample, tuple):
+            label_fn = itemgetter(-1)
+        elif isinstance(sample, dict):
+            label_key = None
+            for _key in sample:
+                if 'label' in _key.lower():
+                    label_key = _key
+                    break
+            if label_key is None:
+                raise AssertionError("Sample of dataset is a dict. Label key of sample is ambiguous.")
+            else:
+                label_fn = itemgetter(label_key)
+        elif isinstance(sample, torch.Tensor):
+            def label_fn(_sample):
+                return _sample.cpu().detach().numpy()
+        elif isinstance(sample, np.ndarray):
+            def label_fn(x):
+                return x
         else:
-            p = np.ones(self.n_classes)/self.n_classes
-        self.p = p
+            raise AssertionError("Unknown type of samples in dataset.")
+        return label_fn
 
     def __getitem__(self, item):
-        label = np.random.choice(
-            np.arange(self.n_classes, dtype=np.int),
-            size=self.sample_shape,
-            p=self.p)
-        return {
-            'input': None,
-            'label': label
-        }
-
-    def __iter__(self):
-        for i in range(self.n_samples):
-            yield self[i]
+        return self.label_fn(self.dataset[item])
 
     def __len__(self):
-        return self.n_samples
+        return len(self.dataset)
 
 
 def count_classes(dataset, num_classes, disable=True):
     class_counts = torch.zeros(num_classes, dtype=torch.long)
     sample_with_class_count = torch.zeros(num_classes, dtype=torch.long)
-    for _labels in tqdm(dataset, disable=disable):
-        _ind, _counts = _labels['label'].unique(return_counts=True)
+    for _sample in tqdm(dataset, disable=disable):
+        _ind, _counts = _sample['label'].unique(return_counts=True)
         class_counts[_ind] += _counts
         sample_with_class_count[_ind] += 1
     return class_counts, sample_with_class_count
@@ -60,7 +66,7 @@ def instance_class_matrix(dataset, num_classes, disable=True):
 
 
 def make_stratified_split_of_segmentation_dataset(
-        dataset: Dataset,
+        dataset: Optional[Dataset, np.ndarray, List],
         num_classes: int,
         split_ratio: Optional[float] = 0.2,
         names_of_classes: Optional[int] = None,
@@ -69,6 +75,8 @@ def make_stratified_split_of_segmentation_dataset(
         max_optimization_iterations: int = 1000000,
         split_n_sample_slack: int = 0,
 ):
+    if isinstance(dataset, Dataset):
+        dataset = OnlyLabelsDataset(dataset)
     disable_tqdm = not verbose
     ds_cc, ds_swcc = count_classes(dataset, num_classes, disable=disable_tqdm)
     if names_of_classes is None:
@@ -136,14 +144,3 @@ def make_stratified_split_of_segmentation_dataset(
     # for _scene_id in scenes_with_no_classes_but_removed:
     #     print(f"scene_id={_scene_id}: {labels[_scene_id]['semantic'].unique()}")
     return best_testset
-
-
-def main():
-    num_classes = 20
-    dataset = MockSegmentationDataset(n_classes=num_classes)
-    split = make_stratified_split_of_segmentation_dataset(dataset, num_classes)
-    # TODO make test for output of function
-
-
-if __name__ == '__main__':
-    main()
