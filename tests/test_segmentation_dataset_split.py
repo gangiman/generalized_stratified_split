@@ -34,10 +34,6 @@ class MockSegmentationDataset(Dataset):
             'label': label
         }
 
-    def __iter__(self):
-        for i in range(self.n_samples):
-            yield self[i]
-
     def __len__(self):
         return self.n_samples
 
@@ -45,5 +41,15 @@ class MockSegmentationDataset(Dataset):
 def test_split():
     num_classes = 20
     dataset = MockSegmentationDataset(n_classes=num_classes)
-    split = make_stratified_split_of_segmentation_dataset(dataset, num_classes)
+    split = make_stratified_split_of_segmentation_dataset(dataset, num_classes,
+                                                          max_optimization_iterations=100,
+                                                          verbose=True)
     # TODO make test for output of function
+
+
+def main():
+    test_split()
+
+
+if __name__ == '__main__':
+    main()
